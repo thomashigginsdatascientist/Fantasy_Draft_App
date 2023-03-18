@@ -1,0 +1,431 @@
+
+#load libraries ----
+library(shiny)
+library(tidyverse)
+library(DT)
+library(rsconnect)
+library(shinythemes)
+
+# Define main UI of the application ----
+mainui <- fluidPage(
+  
+  theme = shinytheme("flatly"),
+
+    # Application title
+    titlePanel("Drafting For The Masters!"),
+
+    # Sidebar with a slider input for number of bins 
+    sidebarLayout(
+        sidebarPanel(
+            uiOutput(outputId = "login"),
+            br(),
+            h5("The draft player button will become available when it is your turn to draft."),
+            br(),
+            uiOutput(outputId = "current_drafter"),
+            br(),
+            uiOutput(outputId = "draft_button"),
+            br(),
+            h4("Current Draft Board:"),
+            br(),
+            dataTableOutput(outputId = "current_roster"),
+            br(),
+            h4("Current Draft Picks:"),
+            br(),
+            dataTableOutput(outputId = "current_picks"),
+            br(),
+            uiOutput(outputId = "reset_picks"),
+            br(),
+            uiOutput(outputId = "reset_loop"),
+            br(),
+            uiOutput(outputId = "reset_players"),
+            br(),
+            uiOutput(outputId = "starter"),
+            
+        ),
+
+        # Show a plot of the generated distribution
+        mainPanel(
+          h4("Current Players:"),
+          br(),
+          br(),
+           dataTableOutput(outputId = "Queue")
+        )
+    )
+)
+
+#Define the opening UI of the application, which requires user input to generate the main UI ----
+ui <- fluidPage(
+  
+  uiOutput(outputId = "full_UI")
+  
+)
+
+# server of application ----
+server <- function(input, output, session) {
+      
+  #initial modal that shows when "logging in" ----
+      showModal(
+      modalDialog(textInput(inputId = "name", label = "Your Name"),
+                  actionButton(inputId = "name_enter", label = "Enter The Draft!"),
+                  size = "l", 
+                  footer = NULL,
+                  easyClose = FALSE)
+      )
+
+  
+  observeEvent(input$name_enter, {
+    
+    if(input$name == "Higgy"){
+    
+    output$full_UI <- renderUI({
+      
+      mainui
+      
+    })
+    
+    output$login <- renderUI({
+      h4(paste0("Currently logged in as: ", input$name))
+    })
+    
+    output$starter <- renderUI({
+      actionButton(inputId = "start_draft", label = "Start Draft")
+    })
+    
+    output$reset_picks <- renderUI({
+      actionButton(inputId = "reset_picks_b", label = "Reset Draft Picks")
+    })
+    
+    output$reset_loop <- renderUI({
+      actionButton(inputId = "reset_loop_b", label = "Reset Loop")
+    })
+    
+    output$reset_players <- renderUI({
+      actionButton(inputId = "reset_players_b", label = "Reset Players")
+    })
+    
+    new_guest <- as.data.frame(input$name)
+    colnames(new_guest) <- "player"
+    
+    old_guests <- readRDS("files/players.RDS")
+    old_guests <- as.data.frame(old_guests)
+    colnames(old_guests) <- "player"
+    
+    new_guest <- rbind(old_guests, new_guest)
+    
+    new_guest <- new_guest %>%
+      filter(!is.na(player)) %>%
+      distinct(player)
+    
+    new_guest %>%
+      drafters()
+    
+    removeModal()
+    
+    saveRDS(new_guest, "files/players.RDS")
+    
+    data <- readRDS("files/roster.RDS")
+    
+    data %>%
+      roster()
+    
+    }else{
+      
+      output$full_UI <- renderUI({
+        
+        mainui
+        
+      })
+      
+      output$login <- renderUI({
+        h4(paste0("Currently logged in as: ", input$name))
+      })
+      
+      new_guest <- as.data.frame(input$name)
+      colnames(new_guest) <- "player"
+      
+      old_guests <- readRDS("files/players.RDS")
+      old_guests <- as.data.frame(old_guests)
+      colnames(old_guests) <- "player"
+      
+      new_guest <- rbind(old_guests, new_guest)
+      
+      new_guest <- new_guest %>%
+        filter(!is.na(player)) %>%
+        distinct(player)
+      
+      new_guest %>%
+        drafters()
+      
+      removeModal()
+      
+      saveRDS(new_guest, "files/players.RDS")
+      
+      data <- readRDS("files/roster.RDS")
+      
+      data %>%
+        roster()
+      
+    }
+    
+  })
+  
+  #observe reset button clicks ----
+  observeEvent(input$reset_loop_b,{
+    
+    rv <- data.frame(loop = 0)
+    
+    saveRDS(rv, "files/loop.RDS")
+    
+  })
+  
+  observeEvent(input$reset_picks_b,{
+    
+    picks <- data.frame(player = NA, draft_pick = NA)
+    
+    saveRDS(picks, "files/picks.RDS")
+    
+  })
+  
+  observeEvent(input$reset_players_b,{
+    
+    picks <- data.frame(player = "Higgy")
+    
+    saveRDS(picks, "files/players.RDS")
+    
+  })
+  
+  
+  
+  
+  #loop through current players and only display draft player button when it is that player's turn ----
+  rv <- reactiveVal()
+  
+  observe({
+    
+    invalidateLater(1000)
+    
+    reader <- readRDS("files/loop.RDS")
+    
+    rv <- reader$loop
+    rv %>%
+      rv()
+    
+  })
+  
+  observe({
+    
+    if(is.null(input$name)){
+      num <- 0
+    }else{
+      num <- rv()
+    }
+    
+    if(num == 0){
+      
+      print("Need To Press Start Draft!")
+      
+    }else if(num <= nrow(drafters())){
+      
+      draftlist <- drafters()
+      
+      current_player <- draftlist[num,]
+      
+      output$current_drafter <- renderUI({
+        
+        h4(paste0("Current Drafter: ", current_player))
+        
+      })
+      
+      if(input$name == current_player){
+        
+        output$draft_button <- renderUI({
+          actionButton(inputId = "draft_golfer", label = "Draft This Guy Already!")
+        })
+        
+      }else{
+        output$draft_button <- NULL
+      }
+    
+      
+    }else{
+      
+      rv <- 1
+      rv %>%
+        rv()
+      num <- 1
+      
+      writer <- data.frame(loop = rv)
+      
+      saveRDS(writer, "files/loop.RDS")
+      
+      draftlist <- drafters()
+      
+      current_player <- draftlist[num,]
+      
+      output$draft_button <- renderUI({
+        h4(paste0("Current Drafter: ", current_player))
+      })
+      
+      if(input$name == current_player){
+        
+        output$draft_button <- renderUI({
+          actionButton(inputId = "draft_golfer", label = "Draft This Guy Already!")
+        })
+        
+      }else{
+        output$draft_button <- NULL
+      }
+      
+    }
+    
+    
+  })
+  
+  
+
+  #render UI objects for displaying data ----
+  output$Queue <- renderDataTable({
+    
+    data <- drafters()
+    
+    DT::datatable(data = data)
+    
+  })
+  
+  output$current_roster <- renderDataTable({
+    
+    data <- roster()
+    
+    DT::datatable(data = data)
+    
+  })
+  
+  output$current_picks <- renderDataTable({
+    
+    data <- draft_picks()
+    
+    DT::datatable(data = data)
+    
+  })
+  
+  #Declare reactive values used to move data around the app ----
+  draft_picks <- reactiveVal()
+  drafters <- reactiveVal()
+  roster <- reactiveVal()
+  
+  
+  #update current players lobby in "real time" ----
+  observe({
+    
+    invalidateLater(1000)
+    
+    old_guests <- readRDS("files/players.RDS")
+    old_guests <- as.data.frame(old_guests)
+    colnames(old_guests) <- "player"
+    
+    old_guests <- old_guests %>%
+      distinct(player)
+    
+    old_guests %>%
+      drafters()
+    
+    
+  })
+  
+  
+  #start draft player button loop with start draft button ----
+  observeEvent(input$start_draft, {
+    
+    rv <- rv() + 1
+    rv %>%
+      rv()
+    
+    writer <- data.frame(loop = rv)
+    
+    saveRDS(writer, "files/loop.RDS")
+    
+  })
+  
+  #update current draft picks in "real time" ----
+  observe({
+    
+    invalidateLater(1000)
+    
+    picks <- readRDS("files/picks.RDS")
+    
+    picks <- picks %>%
+      filter(!is.na(draft_pick))
+    
+    picks %>%
+      draft_picks()
+    
+  })
+  
+  
+  #update current roster data in "real time" ----
+  observe({
+    
+    invalidateLater(1000)
+    
+    roster_data <- roster()
+    
+    if(is.null(roster())){
+      print("logging in!")
+    }else{
+    
+    selections <- readRDS("files/picks.RDS")
+    
+    new_data <- roster_data %>%
+      filter(!golfer %in% selections$draft_pick)
+    
+    new_data %>%
+      roster()
+    
+    }
+    
+    
+    
+  })
+  
+  #fire logic to move to the next player when previous player makes their selection ----
+  observeEvent(input$draft_golfer, {
+    
+    roster_data <- roster()
+    
+    row <- input$current_roster_rows_selected
+    selected_data <- roster_data[row,]
+    
+    new_data <- roster_data %>%
+      filter(!golfer %in% selected_data$golfer)
+    
+    pick <- data.frame(input$name)
+    colnames(pick) <- "player"
+    pick$draft_pick <- selected_data$golfer
+    
+    selections <- readRDS("files/picks.RDS")
+    
+    selections <- rbind(selections, pick)
+    
+    saveRDS(selections, "files/picks.RDS")
+    
+    selections <- readRDS("files/picks.RDS")
+    
+    new_data <- new_data %>%
+      filter(!golfer %in% selections$draft_pick)
+    
+    new_data %>%
+      roster()
+    
+    rv <- rv() + 1
+    rv %>%
+      rv()
+    writer <- data.frame(loop = rv)
+    
+    saveRDS(writer, "files/loop.RDS")
+    
+  })
+  
+}
+
+# Run the application ---- 
+shinyApp(ui = ui, server = server)
