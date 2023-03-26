@@ -19,9 +19,11 @@ mainui <- fluidPage(
         sidebarPanel(
             uiOutput(outputId = "login"),
             br(),
-            h5("The draft player button will become available when it is your turn to draft."),
+            h5("The draft player button will become available when it is your turn to draft. To draft a player, select their row in the roster table and then click 'Draft This Guy Already!'"),
             br(),
             uiOutput(outputId = "current_drafter"),
+            br(),
+            uiOutput(outputId = "current_round"),
             br(),
             uiOutput(outputId = "draft_button"),
             br(),
@@ -39,7 +41,11 @@ mainui <- fluidPage(
             br(),
             uiOutput(outputId = "reset_players"),
             br(),
+            uiOutput(outputId = "reset_rounds"),
+            br(),
             uiOutput(outputId = "starter"),
+            br(),
+            uiOutput(outputId = "number_of_rounds"),
             
         ),
 
@@ -91,6 +97,10 @@ server <- function(input, output, session) {
       actionButton(inputId = "start_draft", label = "Start Draft")
     })
     
+    output$number_of_rounds <- renderUI({
+      numericInput(inputId = "round_numbers", label = "Number of Rounds:", value = 5)
+    })
+    
     output$reset_picks <- renderUI({
       actionButton(inputId = "reset_picks_b", label = "Reset Draft Picks")
     })
@@ -101,6 +111,10 @@ server <- function(input, output, session) {
     
     output$reset_players <- renderUI({
       actionButton(inputId = "reset_players_b", label = "Reset Players")
+    })
+    
+    output$reset_rounds <- renderUI({
+      actionButton(inputId = "reset_rounds_b", label = "Reset Rounds")
     })
     
     new_guest <- as.data.frame(input$name)
@@ -180,7 +194,7 @@ server <- function(input, output, session) {
   
   observeEvent(input$reset_picks_b,{
     
-    picks <- data.frame(player = NA, draft_pick = NA)
+    picks <- data.frame(player = NA, draft_pick = NA, round = NA)
     
     saveRDS(picks, "files/picks.RDS")
     
@@ -195,10 +209,39 @@ server <- function(input, output, session) {
   })
   
   
+  observeEvent(input$reset_rounds_b,{
+    
+    round <- data.frame(round = 1)
+    
+    saveRDS(round, "files/round.RDS")
+    
+    max_rounds <- data.frame(round = as.numeric(input$round_numbers))
+    saveRDS(max_rounds, "files/max rounds.RDS")
+    
+  })
+  
+  #When draft is finished, give option to close modal message and view results in the application
+  observeEvent(input$restart_draft,{
+    
+    round <- data.frame(round = 1)
+    
+    saveRDS(round, "files/round.RDS")
+    
+    max_rounds <- data.frame(round = 5)
+    saveRDS(max_rounds, "files/max rounds.RDS")
+    
+    rv <- data.frame(loop = 0)
+    
+    saveRDS(rv, "files/loop.RDS")
+    
+    removeModal()
+    
+  })
+  
+  
   
   
   #loop through current players and only display draft player button when it is that player's turn ----
-  rv <- reactiveVal()
   
   observe({
     
@@ -213,6 +256,24 @@ server <- function(input, output, session) {
   })
   
   observe({
+    
+    max_rounds <- readRDS("files/max rounds.RDS")
+    current_round <- readRDS("files/round.RDS")
+    
+    max <- max_rounds$round
+    current <- current_round$round
+    
+    if(current == (max+1)){
+      
+      showModal(
+        modalDialog(h3("The draft is complete. Please close the application."),
+                    actionButton(inputId = "restart_draft", label = "See Draft Results!"),
+                    size = "l",
+                    footer = NULL,
+                    easyClose = FALSE)
+      )
+      
+    }else{
     
     if(is.null(input$name)){
       num <- 0
@@ -258,6 +319,13 @@ server <- function(input, output, session) {
       
       saveRDS(writer, "files/loop.RDS")
       
+      round <- round() + 1
+      round %>%
+        round()
+      
+      writer <- data.frame(round = round)
+      saveRDS(writer, "files/round.RDS")
+      
       draftlist <- drafters()
       
       current_player <- draftlist[num,]
@@ -272,13 +340,14 @@ server <- function(input, output, session) {
           actionButton(inputId = "draft_golfer", label = "Draft This Guy Already!")
         })
         
+        
       }else{
         output$draft_button <- NULL
       }
       
     }
     
-    
+    }
   })
   
   
@@ -296,7 +365,7 @@ server <- function(input, output, session) {
     
     data <- roster()
     
-    DT::datatable(data = data)
+    DT::datatable(data = data, selection = "single")
     
   })
   
@@ -308,10 +377,19 @@ server <- function(input, output, session) {
     
   })
   
+  output$current_round <- renderUI({
+    
+    data <- round()
+    h4(paste0("Current Round: ", data))
+    
+  })
+  
   #Declare reactive values used to move data around the app ----
   draft_picks <- reactiveVal()
   drafters <- reactiveVal()
   roster <- reactiveVal()
+  rv <- reactiveVal()
+  round <- reactiveVal()
   
   
   #update current players lobby in "real time" ----
@@ -334,6 +412,8 @@ server <- function(input, output, session) {
   
   
   #start draft player button loop with start draft button ----
+  #randomize draft order based on who is in player lobby
+  #set "official" number of randoms that draft will be
   observeEvent(input$start_draft, {
     
     rv <- rv() + 1
@@ -343,6 +423,42 @@ server <- function(input, output, session) {
     writer <- data.frame(loop = rv)
     
     saveRDS(writer, "files/loop.RDS")
+    
+    round <- 1
+    round %>%
+      round()
+    
+    writer <- data.frame(round = round)
+    
+    saveRDS(writer, "files/round.RDS")
+    
+    max_rounds <- data.frame(round = as.numeric(input$round_numbers))
+    saveRDS(max_rounds, "files/max rounds.RDS")
+    
+    old_guests <- readRDS("files/players.RDS")
+    old_guests <- as.data.frame(old_guests)
+    colnames(old_guests) <- "player"
+    
+    old_guests <- old_guests %>%
+      distinct(player)
+    
+    old_guests$player <- old_guests[sample(1:nrow(old_guests)),]
+    
+    old_guests %>%
+      drafters()
+    
+    saveRDS(old_guests, "files/players.RDS")
+    
+  })
+  
+  #update current round in "real time" ----
+  observe({
+    
+    invalidateLater(1000)
+    
+    round <- readRDS("files/round.RDS")
+    round %>%
+      round()
     
   })
   
@@ -391,6 +507,7 @@ server <- function(input, output, session) {
   observeEvent(input$draft_golfer, {
     
     roster_data <- roster()
+    round <- round()
     
     row <- input$current_roster_rows_selected
     selected_data <- roster_data[row,]
@@ -401,6 +518,7 @@ server <- function(input, output, session) {
     pick <- data.frame(input$name)
     colnames(pick) <- "player"
     pick$draft_pick <- selected_data$golfer
+    pick$round <- round
     
     selections <- readRDS("files/picks.RDS")
     
@@ -417,6 +535,7 @@ server <- function(input, output, session) {
       roster()
     
     rv <- rv() + 1
+    
     rv %>%
       rv()
     writer <- data.frame(loop = rv)
